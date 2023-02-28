@@ -2,7 +2,6 @@ package com.andmcadams.gloopylite;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Provides;
-import java.awt.Color;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -58,9 +57,9 @@ public class GloopyLitePlugin extends Plugin
 	private GloopyLiteConfig config;
 
 	final String QUERY_STRING_TAG = "query";
-	final Pattern GLOOPY_PATTERN = Pattern.compile("\\[\\[(.*?)]]");
-	final Pattern LINK_PATTERN = Pattern.compile("<" + QUERY_STRING_TAG + "=(.*?)>");
-	final String GLOOPY_MESSAGE_PATTERN = "(<" + QUERY_STRING_TAG + "=.*?>)<col=[a-f0-9]+?><u=[a-f0-9]+?>";
+	final Pattern GLOOPY_PATTERN = Pattern.compile("\\[\\[([^#<>\\[\\]_{|}]*?)]]");
+	final Pattern LINK_PATTERN = Pattern.compile("<" + QUERY_STRING_TAG + "=([^#<>\\[\\]_{|}]*?)>");
+	final String GLOOPY_MESSAGE_PATTERN = "(<" + QUERY_STRING_TAG + "=.[^#<>\\[\\]_{|}]*?>)<col=[a-f0-9]+?><u=[a-f0-9]+?>";
 
 	@Override
 	protected void startUp() throws Exception
@@ -74,10 +73,11 @@ public class GloopyLitePlugin extends Plugin
 		log.info("GloopyLite stopped!");
 	}
 
-	private void sendChatMessage(String chatMessage, String link, ChatMessageType t)
+	private void sendLinkMessage(String chatMessage, String link, ChatMessageType t)
 	{
 		final String color = ColorUtil.colorToHexCode(config.textColor());
 
+		// Escape any chars in the message
 		final String message = new ChatMessageBuilder()
 			.append(chatMessage)
 			.build();
@@ -95,21 +95,6 @@ public class GloopyLitePlugin extends Plugin
 				.type(t)
 				.runeLiteFormattedMessage(taggedMessage.toString())
 				.build());
-	}
-
-	private void addLinkMessage(String query, ChatMessageType t)
-	{
-		// Wiki url encode
-		String wikiUrlEncodedQuery = null;
-		try
-		{
-			wikiUrlEncodedQuery = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.toString());
-			sendChatMessage("Search the wiki for \"" + query + "\"", wikiUrlEncodedQuery, t);
-		}
-		catch (UnsupportedEncodingException e)
-		{
-			log.error("Error encoding string", e);
-		}
 	}
 
 	final ImmutableMap<ChatMessageType, ChatMessageType> CHAT_MAP = ImmutableMap.<ChatMessageType, ChatMessageType>builder()
@@ -135,9 +120,9 @@ public class GloopyLitePlugin extends Plugin
 		// For each match, add a message about the link.
 		while (m.find())
 		{
-			String searchString = m.group(1);
-			log.debug("Attempting to create a link for the search string: " + searchString);
-			addLinkMessage(searchString, t);
+			String searchString = m.group(1).trim();
+			log.debug("Creating a link for the search string: " + searchString);
+			sendLinkMessage("Search the wiki for \"" + searchString + "\"", searchString, t);
 		}
 	}
 
@@ -173,16 +158,24 @@ public class GloopyLitePlugin extends Plugin
 	{
 		// I think this is actually better than using ::wiki since it adds another msg to the chat on click.
 		// Also not sure about cs stability.
-		String url = new StringBuilder()
-			.append("https://oldschool.runescape.wiki/?search=")
-			.append(searchString)
-			.append("&title=Special%3ASearch")
-			.toString();
+		try
+		{
+			String wikiUrlEncodedQuery = URLEncoder.encode(searchString.trim(), StandardCharsets.UTF_8.toString());
+			String url = new StringBuilder()
+				.append("https://oldschool.runescape.wiki/?search=")
+				.append(wikiUrlEncodedQuery)
+				.append("&title=Special%3ASearch")
+				.toString();
 
-		LinkBrowser.browse(url);
+			LinkBrowser.browse(url);
 
-		// Go to link in the browser (or maybe fire cs2)
-		log.debug("Going to " + url + "...");
+			// Go to link in the browser (or maybe fire cs2)
+			log.debug("Going to " + url + "...");
+		}
+		catch (UnsupportedEncodingException e)
+		{
+			log.error("Error encoding string", e);
+		}
 	}
 
 	@Subscribe
