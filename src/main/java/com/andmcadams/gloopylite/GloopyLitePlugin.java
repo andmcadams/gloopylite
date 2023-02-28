@@ -1,19 +1,19 @@
 package com.andmcadams.gloopylite;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
 import com.google.inject.Provides;
 import java.awt.Color;
-import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
-import net.runelite.api.Varbits;
+import net.runelite.api.IconID;
+import net.runelite.api.KeyCode;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.JavaScriptCallback;
@@ -31,11 +31,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.LinkBrowser;
-import okhttp3.Call;
-import okhttp3.Callback;
 import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
 
 @Slf4j
 @PluginDescriptor(
@@ -50,9 +46,6 @@ public class GloopyLitePlugin extends Plugin
 	private ClientThread clientThread;
 
 	@Inject
-	private GloopyLiteConfig config;
-
-	@Inject
 	private ChatMessageManager chatMessageManager;
 
 	@Inject
@@ -60,6 +53,14 @@ public class GloopyLitePlugin extends Plugin
 
 	@Inject
 	private OkHttpClient okHttpClient;
+
+	@Inject
+	private GloopyLiteConfig config;
+
+	final String QUERY_STRING_TAG = "query";
+	final Pattern GLOOPY_PATTERN = Pattern.compile("\\[\\[(.*?)]]");
+	final Pattern LINK_PATTERN = Pattern.compile("<" + QUERY_STRING_TAG + "=(.*?)>");
+	final String GLOOPY_MESSAGE_PATTERN = "(<" + QUERY_STRING_TAG + "=.*?>)<col=[a-f0-9]+?><u=[a-f0-9]+?>";
 
 	@Override
 	protected void startUp() throws Exception
@@ -73,90 +74,46 @@ public class GloopyLitePlugin extends Plugin
 		log.info("GloopyLite stopped!");
 	}
 
-	final Pattern GLOOPY_PATTERN = Pattern.compile("\\[\\[(.*?)]]");
-
-	final int TEXT_COLOR = 0x0000FF;
-	final int TEXT_HIGHLIGHT_COLOR = 0xFF00FF;
-	final String hex = ColorUtil.colorToHexCode(new Color(TEXT_COLOR));
-	final String hexHighlight = ColorUtil.colorToHexCode(new Color(TEXT_HIGHLIGHT_COLOR));
-
 	private void sendChatMessage(String chatMessage, String link, ChatMessageType t)
 	{
+		final String color = ColorUtil.colorToHexCode(config.textColor());
+
 		final String message = new ChatMessageBuilder()
 			.append(chatMessage)
 			.build();
-		final String underlinedMessage = new StringBuilder()
-			.append("<link=")
-			.append(link)
-			.append(">")
-			.append("<col=")
-			.append(hex)
-			.append(">")
-			.append("<u=")
-			.append(hex)
-			.append(">")
+		// Need to do this outside ChatMessageBuilder since it will eat my angle brackets
+		final StringBuilder taggedMessage = new StringBuilder();
+		taggedMessage.append(IconID.CHAIN_LINK)
+			.append("<").append(QUERY_STRING_TAG).append("=").append(link).append(">")
+			.append("<col=").append(color).append(">")
+			.append("<u=").append(color).append(">")
 			.append(message)
-			.append("</u></col>").toString();
+			.append("</u></col>");
 
 		chatMessageManager.queue(
 			QueuedMessage.builder()
 				.type(t)
-				.runeLiteFormattedMessage(underlinedMessage)
+				.runeLiteFormattedMessage(taggedMessage.toString())
 				.build());
 	}
 
-	final Pattern p = Pattern.compile("https://oldschool\\.runescape\\.wiki/(w/.*)");
-	private void attemptToAddLink(String query, ChatMessageType t)
+	private void addLinkMessage(String query, ChatMessageType t)
 	{
 		// Wiki url encode
-		String wikiUrlEncodedQuery = URLEncoder.encode(query.trim());
-		log.error("Encoded query: " + wikiUrlEncodedQuery);
-		String url = new StringBuilder()
-			.append("https://oldschool.runescape.wiki/api.php?action=opensearch&search=")
-			.append(wikiUrlEncodedQuery)
-			.append("&redirects=resolve")
-			.toString();
-		// Make the request
-		Request r = new Request.Builder()
-			.url(url)
-			.get().build();
-		okHttpClient.newCall(r).enqueue(new Callback()
+		String wikiUrlEncodedQuery = null;
+		try
 		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.error("Oh no, a wittle fucky wucky happened :(((((");
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				JsonArray queryResponse = new Gson().fromJson(response.body().string(), JsonArray.class);
-				JsonArray pageNames = queryResponse.get(1).getAsJsonArray();
-				if (pageNames.size() == 0)
-					return;
-				if ("Nonexistence".equals(pageNames.get(0).getAsString()))
-				{
-					log.warn("Not linking, page is not existent");
-					return;
-				}
-
-				String link = queryResponse.get(3).getAsJsonArray().get(0).getAsString();
-				Matcher m = p.matcher(link);
-				if (m.find())
-				{
-					sendChatMessage("Wiki link to " + pageNames.get(0), m.group(1), t);
-					log.error("Found page " + pageNames.get(0));
-				}
-			}
-		});
+			wikiUrlEncodedQuery = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.toString());
+			sendChatMessage("Search the wiki for \"" + query + "\"", wikiUrlEncodedQuery, t);
+		}
+		catch (UnsupportedEncodingException e)
+		{
+			log.error("Error encoding string", e);
+		}
 	}
 
 	final ImmutableMap<ChatMessageType, ChatMessageType> CHAT_MAP = ImmutableMap.<ChatMessageType, ChatMessageType>builder()
-		// Public is wrong here but I don't know if there is a better option
-		.put(ChatMessageType.PUBLICCHAT, ChatMessageType.CONSOLE)
 		.put(ChatMessageType.FRIENDSCHAT, ChatMessageType.FRIENDSCHATNOTIFICATION)
-		.put(ChatMessageType.PRIVATECHAT, ChatMessageType.PRIVATECHAT)
 		.put(ChatMessageType.CLAN_CHAT, ChatMessageType.CLAN_MESSAGE)
 		.put(ChatMessageType.CLAN_GUEST_CHAT, ChatMessageType.CLAN_GUEST_MESSAGE)
 		.put(ChatMessageType.CLAN_GIM_CHAT, ChatMessageType.CLAN_GIM_MESSAGE)
@@ -165,73 +122,67 @@ public class GloopyLitePlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage chatMessage)
 	{
-		// If the message is from the cc
+		// Figure out what type of message we need to respond with
 		ChatMessageType t = CHAT_MAP.get(chatMessage.getType());
 
-		// If we don't find any matches, escape now!
+		// Default to a CONSOLE message. This is not ideal since it means it won't appear in public/private only tabs
 		if (t == null)
-			return;
+			t = ChatMessageType.CONSOLE;
 
-		log.warn("Message received: " + chatMessage.getMessage());
 		String message = chatMessage.getMessage();
 		Matcher m = GLOOPY_PATTERN.matcher(message);
+
+		// For each match, add a message about the link.
 		while (m.find())
 		{
-			String page = m.group(1);
-			log.warn("Attempting to create a link for the page: " + page);
-			attemptToAddLink(page, t);
+			String searchString = m.group(1);
+			log.debug("Attempting to create a link for the search string: " + searchString);
+			addLinkMessage(searchString, t);
 		}
 	}
 
-	final Pattern LINK_PATTERN = Pattern.compile("<link=(.*?)>");
-	private void unhighlightLink(Widget w)
+	private void toggleHighlight(Widget w, boolean shouldHighlight)
 	{
 		String text = w.getText();
+		String colorHex = ColorUtil.colorToHexCode(shouldHighlight ? config.highlightTextColor() : config.textColor());
 
 		Matcher m = LINK_PATTERN.matcher(text);
 		if (m.find())
 		{
-			String newText = w.getText().replaceFirst("<col=[a-f0-9]+?><u=[a-f0-9]+?>",
-				"<col=" + hex + "><u=" + hex + ">");
-			log.error("Unhighlighted text: " + w.getText() + " -> " + newText);
+			String newText = w.getText().replaceFirst(GLOOPY_MESSAGE_PATTERN,
+				"$1<col=" + colorHex + "><u=" + colorHex + ">");
 			w.setText(newText);
 		}
 	}
 
-	private void highlightLink(Widget w)
+	private void onClick(Widget w)
 	{
-		String text = w.getText();
-
-		Matcher m = LINK_PATTERN.matcher(text);
-		if (m.find())
+		// If the setting for control click is on, require it
+		if (!config.requireControlClick() || client.isKeyPressed(KeyCode.KC_CONTROL))
 		{
-			String newText = w.getText().replaceFirst("<col=[a-f0-9]+?><u=[a-f0-9]+?>",
-				"<col=" + hexHighlight + "><u=" + hexHighlight + ">");
-			log.error("Highlighted text: " + w.getText() + " -> " + newText);
-			w.setText(newText);
+			String text = w.getText();
+			Matcher m = LINK_PATTERN.matcher(text);
+			if (m.find())
+			{
+				openLinkInBrowser(m.group(1));
+			}
 		}
 	}
 
-	private void onKeyPress(Widget w, int keyCode)
+	private void openLinkInBrowser(String searchString)
 	{
-		if (keyCode != 0)
-			return;
-		String text = w.getText();
-		// Parse link from text via tag
+		// I think this is actually better than using ::wiki since it adds another msg to the chat on click.
+		// Also not sure about cs stability.
+		String url = new StringBuilder()
+			.append("https://oldschool.runescape.wiki/?search=")
+			.append(searchString)
+			.append("&title=Special%3ASearch")
+			.toString();
 
-		// This could potentially be dangerous if someone else makes a plugin that matches this regex, then clicking
-		// a message could take you to a bad website.
-		// Make sure to only go if the url matches the wiki
-		Matcher m = LINK_PATTERN.matcher(text);
-		if (m.find())
-		{
-			String link = "https://oldschool.runescape.wiki/" + m.group(1);
+		LinkBrowser.browse(url);
 
-			LinkBrowser.browse(link);
-
-			// Go to link in the browser (or maybe fire cs2)
-			log.error("Going to " + link + "...");
-		}
+		// Go to link in the browser (or maybe fire cs2)
+		log.debug("Going to " + url + "...");
 	}
 
 	@Subscribe
@@ -242,21 +193,26 @@ public class GloopyLitePlugin extends Plugin
 		{
 			Widget chatbox = client.getWidget(WidgetInfo.CHATBOX_MESSAGE_LINES);
 			// Is this going to overwrite some listeners?
-			for (int i = 0; i < 2000; i += 4)
+			// This is incredibly stupid, but I am not sure of a better way to do this.
+			// There doesn't seem to be an onWidgetChanged event, although maybe I could listen for any of these to change
+			if (chatbox == null || chatbox.getDynamicChildren() == null)
+				return;
+			for (int i = 0; i < chatbox.getDynamicChildren().length; i += 4)
 			{
+				// Sometimes we want this widget (CONSOLE messages for ex)
 				Widget w = chatbox.getDynamicChildren()[i];
-				w.setOnMouseOverListener((JavaScriptCallback) ev -> highlightLink(w));
-				w.setOnMouseLeaveListener((JavaScriptCallback) ev -> unhighlightLink(w));
-				w.setOnClickListener((JavaScriptCallback) ev -> onKeyPress(w, ev.getTypedKeyCode()));
+				w.setOnMouseOverListener((JavaScriptCallback) ev -> toggleHighlight(w, true));
+				w.setOnMouseLeaveListener((JavaScriptCallback) ev -> toggleHighlight(w, false));
+				w.setOnClickListener((JavaScriptCallback) ev -> onClick(w));
 				w.setHasListener(true);
 
+				// Unless we actually want this widget (clan messages for ex)
 				Widget w2 = chatbox.getDynamicChildren()[i+1];
-				w2.setOnMouseOverListener((JavaScriptCallback) ev -> highlightLink(w2));
-				w2.setOnMouseLeaveListener((JavaScriptCallback) ev -> unhighlightLink(w2));
-				w2.setOnClickListener((JavaScriptCallback) ev -> onKeyPress(w2, ev.getTypedKeyCode()));
+				w2.setOnMouseOverListener((JavaScriptCallback) ev -> toggleHighlight(w2, true));
+				w2.setOnMouseLeaveListener((JavaScriptCallback) ev -> toggleHighlight(w2, false));
+				w2.setOnClickListener((JavaScriptCallback) ev -> onClick(w2));
 				w2.setHasListener(true);
 			}
-
 		}
 	}
 
