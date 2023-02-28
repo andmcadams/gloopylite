@@ -121,6 +121,8 @@ public class GloopyLitePlugin extends Plugin
 		while (m.find())
 		{
 			String searchString = m.group(1).trim();
+			if (searchString.isEmpty())
+				return;
 			log.debug("Creating a link for the search string: " + searchString);
 			sendLinkMessage("Search the wiki for \"" + searchString + "\"", searchString, t);
 		}
