@@ -61,16 +61,25 @@ public class GloopyLitePlugin extends Plugin
 	final Pattern LINK_PATTERN = Pattern.compile("<" + QUERY_STRING_TAG + "=([^#<>\\[\\]_{|}]*?)>");
 	final String GLOOPY_MESSAGE_PATTERN = "(<" + QUERY_STRING_TAG + "=.[^#<>\\[\\]_{|}]*?>)<col=[a-f0-9]+?><u=[a-f0-9]+?>";
 
+	final ImmutableMap<ChatMessageType, ChatMessageType> CHAT_MAP = ImmutableMap.<ChatMessageType, ChatMessageType>builder()
+		.put(ChatMessageType.FRIENDSCHAT, ChatMessageType.FRIENDSCHATNOTIFICATION)
+		.put(ChatMessageType.CLAN_CHAT, ChatMessageType.CLAN_MESSAGE)
+		.put(ChatMessageType.CLAN_GUEST_CHAT, ChatMessageType.CLAN_GUEST_MESSAGE)
+		.put(ChatMessageType.CLAN_GIM_CHAT, ChatMessageType.CLAN_GIM_MESSAGE)
+		.build();
+
 	@Override
 	protected void startUp() throws Exception
 	{
 		log.info("GloopyLite started!");
+		addListenersToChatbox();
 	}
 
 	@Override
 	protected void shutDown() throws Exception
 	{
 		log.info("GloopyLite stopped!");
+		removeListenersFromChatbox();
 	}
 
 	private void sendLinkMessage(String chatMessage, String link, ChatMessageType t)
@@ -96,13 +105,6 @@ public class GloopyLitePlugin extends Plugin
 				.runeLiteFormattedMessage(taggedMessage.toString())
 				.build());
 	}
-
-	final ImmutableMap<ChatMessageType, ChatMessageType> CHAT_MAP = ImmutableMap.<ChatMessageType, ChatMessageType>builder()
-		.put(ChatMessageType.FRIENDSCHAT, ChatMessageType.FRIENDSCHATNOTIFICATION)
-		.put(ChatMessageType.CLAN_CHAT, ChatMessageType.CLAN_MESSAGE)
-		.put(ChatMessageType.CLAN_GUEST_CHAT, ChatMessageType.CLAN_GUEST_MESSAGE)
-		.put(ChatMessageType.CLAN_GIM_CHAT, ChatMessageType.CLAN_GIM_MESSAGE)
-		.build();
 
 	@Subscribe
 	public void onChatMessage(ChatMessage chatMessage)
@@ -159,7 +161,7 @@ public class GloopyLitePlugin extends Plugin
 	private void openLinkInBrowser(String searchString)
 	{
 		// I think this is actually better than using ::wiki since it adds another msg to the chat on click.
-		// Also not sure about cs stability.
+		// Also not sure about cs2 stability.
 		try
 		{
 			String wikiUrlEncodedQuery = URLEncoder.encode(searchString.trim(), StandardCharsets.UTF_8.toString());
@@ -180,35 +182,69 @@ public class GloopyLitePlugin extends Plugin
 		}
 	}
 
+	private void addListenersToChatWidget(Widget w)
+	{
+		w.setOnMouseOverListener((JavaScriptCallback) ev -> toggleHighlight(w, true));
+		w.setOnMouseLeaveListener((JavaScriptCallback) ev -> toggleHighlight(w, false));
+		w.setOnClickListener((JavaScriptCallback) ev -> onClick(w));
+		w.setHasListener(true);
+	}
+
+	private void addListenersToChatbox()
+	{
+		Widget chatbox = client.getWidget(WidgetInfo.CHATBOX_MESSAGE_LINES);
+		// This doesn't seem to overwrite any vanilla listeners but this would definitely conflict with someone
+		// doing the same thing.
+		// This is incredibly stupid, but I am not sure of a better way to do this.
+		// There doesn't seem to be an onWidgetChanged event, although maybe I could listen for any of these to change
+		if (chatbox == null || chatbox.getDynamicChildren() == null)
+			return;
+		for (int i = 0; i < chatbox.getDynamicChildren().length; i += 4)
+		{
+			// Sometimes we want this widget (CONSOLE messages for ex)
+			Widget w = chatbox.getDynamicChildren()[i];
+			addListenersToChatWidget(w);
+
+			// Unless we actually want this widget (clan messages for ex)
+			Widget w2 = chatbox.getDynamicChildren()[i+1];
+			addListenersToChatWidget(w2);
+		}
+	}
+
+	private void removeListenersFromChatWidget(Widget w)
+	{
+		w.setOnMouseOverListener((Object[]) null);
+		w.setOnMouseLeaveListener((Object[]) null);
+		w.setOnClickListener((Object[]) null);
+		w.setHasListener(false);
+	}
+
+	private void removeListenersFromChatbox()
+	{
+		Widget chatbox = client.getWidget(WidgetInfo.CHATBOX_MESSAGE_LINES);
+		// Is this going to overwrite some listeners?
+		// This is incredibly stupid, but I am not sure of a better way to do this.
+		// There doesn't seem to be an onWidgetChanged event, although maybe I could listen for any of these to change
+		if (chatbox == null || chatbox.getDynamicChildren() == null)
+			return;
+		for (int i = 0; i < chatbox.getDynamicChildren().length; i += 4)
+		{
+			// Sometimes we want this widget (CONSOLE messages for ex)
+			Widget w = chatbox.getDynamicChildren()[i];
+			removeListenersFromChatWidget(w);
+
+			// Unless we actually want this widget (clan messages for ex)
+			Widget w2 = chatbox.getDynamicChildren()[i+1];
+			removeListenersFromChatWidget(w2);
+		}
+	}
+
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded widgetLoaded)
 	{
 		int id = widgetLoaded.getGroupId();
 		if (id == WidgetID.CHATBOX_GROUP_ID)
-		{
-			Widget chatbox = client.getWidget(WidgetInfo.CHATBOX_MESSAGE_LINES);
-			// Is this going to overwrite some listeners?
-			// This is incredibly stupid, but I am not sure of a better way to do this.
-			// There doesn't seem to be an onWidgetChanged event, although maybe I could listen for any of these to change
-			if (chatbox == null || chatbox.getDynamicChildren() == null)
-				return;
-			for (int i = 0; i < chatbox.getDynamicChildren().length; i += 4)
-			{
-				// Sometimes we want this widget (CONSOLE messages for ex)
-				Widget w = chatbox.getDynamicChildren()[i];
-				w.setOnMouseOverListener((JavaScriptCallback) ev -> toggleHighlight(w, true));
-				w.setOnMouseLeaveListener((JavaScriptCallback) ev -> toggleHighlight(w, false));
-				w.setOnClickListener((JavaScriptCallback) ev -> onClick(w));
-				w.setHasListener(true);
-
-				// Unless we actually want this widget (clan messages for ex)
-				Widget w2 = chatbox.getDynamicChildren()[i+1];
-				w2.setOnMouseOverListener((JavaScriptCallback) ev -> toggleHighlight(w2, true));
-				w2.setOnMouseLeaveListener((JavaScriptCallback) ev -> toggleHighlight(w2, false));
-				w2.setOnClickListener((JavaScriptCallback) ev -> onClick(w2));
-				w2.setHasListener(true);
-			}
-		}
+			addListenersToChatbox();
 	}
 
 	@Provides
