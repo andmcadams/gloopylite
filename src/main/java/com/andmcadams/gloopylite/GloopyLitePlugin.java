@@ -60,9 +60,9 @@ public class GloopyLitePlugin extends Plugin
 	private GloopyLiteConfig config;
 
 	final String QUERY_STRING_TAG = "query";
-	final Pattern GLOOPY_PATTERN = Pattern.compile("\\[\\[([^#<>\\[\\]_{|}]*?)]]");
-	final Pattern LINK_PATTERN = Pattern.compile("<" + QUERY_STRING_TAG + "=([^#<>\\[\\]_{|}]*?)>");
-	final String GLOOPY_MESSAGE_PATTERN = "(<" + QUERY_STRING_TAG + "=.[^#<>\\[\\]_{|}]*?>)<col=[a-f0-9]+?><u=[a-f0-9]+?>";
+	final Pattern GLOOPY_PATTERN = Pattern.compile("\\[\\[([^#<>\\[\\]{|}]*?)]]");
+	final Pattern LINK_PATTERN = Pattern.compile("<" + QUERY_STRING_TAG + "=([^#<>\\[\\]{|}]*?)>");
+	final String GLOOPY_MESSAGE_PATTERN = "(<" + QUERY_STRING_TAG + "=.[^#<>\\[\\]{|}]*?>)<col=[a-f0-9]+?><u=[a-f0-9]+?>";
 	boolean hideMenuEntries = false;
 
 	final ImmutableMap<ChatMessageType, ChatMessageType> CHAT_MAP = ImmutableMap.<ChatMessageType, ChatMessageType>builder()
