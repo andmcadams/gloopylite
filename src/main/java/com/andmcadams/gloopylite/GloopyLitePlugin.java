@@ -11,9 +11,12 @@ import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.IconID;
 import net.runelite.api.KeyCode;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.api.widgets.Widget;
@@ -60,6 +63,7 @@ public class GloopyLitePlugin extends Plugin
 	final Pattern GLOOPY_PATTERN = Pattern.compile("\\[\\[([^#<>\\[\\]_{|}]*?)]]");
 	final Pattern LINK_PATTERN = Pattern.compile("<" + QUERY_STRING_TAG + "=([^#<>\\[\\]_{|}]*?)>");
 	final String GLOOPY_MESSAGE_PATTERN = "(<" + QUERY_STRING_TAG + "=.[^#<>\\[\\]_{|}]*?>)<col=[a-f0-9]+?><u=[a-f0-9]+?>";
+	boolean hideMenuEntries = false;
 
 	final ImmutableMap<ChatMessageType, ChatMessageType> CHAT_MAP = ImmutableMap.<ChatMessageType, ChatMessageType>builder()
 		.put(ChatMessageType.FRIENDSCHAT, ChatMessageType.FRIENDSCHATNOTIFICATION)
@@ -104,6 +108,20 @@ public class GloopyLitePlugin extends Plugin
 				.type(t)
 				.runeLiteFormattedMessage(taggedMessage.toString())
 				.build());
+	}
+
+	@Subscribe
+	public void onClientTick(ClientTick clientTick)
+	{
+		if (client.getGameState() != GameState.LOGGED_IN || client.isMenuOpen())
+		{
+			return;
+		}
+		if (hideMenuEntries)
+		{
+			hideMenuEntries = false;
+			client.setMenuEntries(new MenuEntry[0]);
+		}
 	}
 
 	@Subscribe
@@ -182,8 +200,20 @@ public class GloopyLitePlugin extends Plugin
 		}
 	}
 
+	private void maybeHideMenuEntries(Widget w)
+	{
+		// If we are on a link message (and clicking would open the link), then hide menu entries to avoid walking etc
+		if (!config.requireControlClick() || client.isKeyPressed(KeyCode.KC_CONTROL))
+		{
+			Matcher m = LINK_PATTERN.matcher(w.getText());
+			if (m.find())
+				hideMenuEntries = !config.requireControlClick() || client.isKeyPressed(KeyCode.KC_CONTROL);
+		}
+	}
+
 	private void addListenersToChatWidget(Widget w)
 	{
+		w.setOnMouseRepeatListener((JavaScriptCallback) ev -> maybeHideMenuEntries(w));
 		w.setOnMouseOverListener((JavaScriptCallback) ev -> toggleHighlight(w, true));
 		w.setOnMouseLeaveListener((JavaScriptCallback) ev -> toggleHighlight(w, false));
 		w.setOnClickListener((JavaScriptCallback) ev -> onClick(w));
@@ -229,11 +259,9 @@ public class GloopyLitePlugin extends Plugin
 			return;
 		for (int i = 0; i < chatbox.getDynamicChildren().length; i += 4)
 		{
-			// Sometimes we want this widget (CONSOLE messages for ex)
 			Widget w = chatbox.getDynamicChildren()[i];
 			removeListenersFromChatWidget(w);
 
-			// Unless we actually want this widget (clan messages for ex)
 			Widget w2 = chatbox.getDynamicChildren()[i+1];
 			removeListenersFromChatWidget(w2);
 		}
